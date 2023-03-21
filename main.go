@@ -7,8 +7,12 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.18.0"
 )
 
 // This is an application which happens to include a library (or a module).
@@ -40,9 +44,30 @@ func main() {
 
 	// Since we don't have any previous context, we take the background one
 	InsertUser(context.Background(), "Foo")
+	// This one will generate an error span.
+	InsertUser(context.Background(), "Bar")
 }
 
 func initTracer() (*trace.TracerProvider, error) {
+
+	// Using the resources, we are adding attributes to all our spans. These
+	// attributes are going to be propagated to all the spans that are created.
+	res, err := resource.New(context.Background(),
+		// Telemetry SDK semantic attributes
+		resource.WithTelemetrySDK(),
+		// Add your own custom attributes to identify your application
+		resource.WithAttributes(
+			// semconv package is versioned because there are breaking changes in different versions.
+			// As of preparing this material, I have picked the latest one.
+			semconv.ServiceNameKey.String("Workshop App"),
+			semconv.ServiceVersionKey.String("v1.0.0"),
+			attribute.String("foo", "bar"),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("creating resource.New: %w", err)
+	}
+
 	// Create an stdout exporter to show the collected spans out to the stdout.
 	stdoutexporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
 	if err != nil {
@@ -53,6 +78,7 @@ func initTracer() (*trace.TracerProvider, error) {
 	// to see how things are tied together.
 	tp := trace.NewTracerProvider(
 		trace.WithBatcher(stdoutexporter),
+		trace.WithResource(res),
 	)
 
 	// Set the global trace provider as what we have created
@@ -89,6 +115,32 @@ func InsertUser(ctx context.Context, user string) error {
 	//
 	ctx2, span := otel.Tracer(name).Start(ctx, "InsertUser")
 	defer span.End()
+
+	// We are annotating the span. Essentially we are adding extra meta data that we can use later on.
+	// Attributes, Events (a.k.a Logs) and Status are 3 different types of annotations we will add.
+	// There is also Links annotation but we will look at it later.
+	//
+	// It is important to check for the IsRecording() API before annotating because if this span is
+	// not going to be recorded, you don't want to waste any more resources annotating it.
+	if span.IsRecording() {
+
+		// You can add what ever attribute you want.
+		span.SetAttributes(
+			attribute.String("user.username", user),
+		)
+
+		// Events are also called span logs. It is very useful to add context information to logs
+		// so that you can associate a trace down to it's logs.
+		span.AddEvent("Got the mutex lock, doing work...")
+
+		// We are going to mark this span as an error span. An error span shows up differently in UI tools.
+		if user == "Bar" {
+			err := fmt.Errorf("user %s is trying to hack", user)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			return err
+		}
+	}
 
 	time.Sleep(500 * time.Microsecond)
 
