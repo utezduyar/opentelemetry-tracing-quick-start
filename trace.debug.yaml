@@ -1,0 +1,22 @@
+
+# This is a configuration that only dumps the traces on the console
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+exporters:
+
+  logging:
+    loglevel: debug
+
+processors:
+  batch:
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging]

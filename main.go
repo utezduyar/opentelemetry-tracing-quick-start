@@ -9,6 +9,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -68,6 +70,14 @@ func initTracer() (*trace.TracerProvider, error) {
 		return nil, fmt.Errorf("creating resource.New: %w", err)
 	}
 
+	// Create an OTLP (OpenTelemetry Protocol) exporter to send them to OpenTelemetry
+	// collector that is running on your machine
+	client := otlptracehttp.NewClient(otlptracehttp.WithEndpoint("localhost:4318"), otlptracehttp.WithInsecure())
+	otlpexporter, err := otlptrace.New(context.Background(), client)
+	if err != nil {
+		return nil, fmt.Errorf("creating OTLP trace exporter: %w", err)
+	}
+
 	// Create an stdout exporter to show the collected spans out to the stdout.
 	stdoutexporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
 	if err != nil {
@@ -78,6 +88,7 @@ func initTracer() (*trace.TracerProvider, error) {
 	// to see how things are tied together.
 	tp := trace.NewTracerProvider(
 		trace.WithBatcher(stdoutexporter),
+		trace.WithBatcher(otlpexporter),
 		trace.WithResource(res),
 	)
 
