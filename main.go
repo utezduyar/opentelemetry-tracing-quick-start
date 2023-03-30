@@ -15,7 +15,33 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.18.0"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
+
+type yourOwnCustomizedSampler struct{}
+
+// ShouldSample is a method in Sampler's interface. This method is called every time, before
+// creating a span with Start(). You can make as advanced analysis as you want before making a decision.
+func (s yourOwnCustomizedSampler) ShouldSample(p trace.SamplingParameters) trace.SamplingResult {
+
+	sampleDecision := trace.RecordAndSample
+	if false {
+		sampleDecision = trace.Drop
+	}
+	return trace.SamplingResult{
+		Decision:   sampleDecision,
+		Tracestate: oteltrace.SpanContextFromContext(p.ParentContext).TraceState(),
+	}
+}
+
+// Description is the other method of the Sampler interface.
+func (s yourOwnCustomizedSampler) Description() string {
+	return "YourOwnCustomizedSampler (Sample which ever you want. Drop on rest)"
+}
+
+func YourOwnCustomizedSampler() trace.Sampler {
+	return yourOwnCustomizedSampler{}
+}
 
 // This is an application which happens to include a library (or a module).
 // For the sake of simplicity every thing is in the main file. It is important
@@ -87,6 +113,34 @@ func initTracer() (*trace.TracerProvider, error) {
 	// Create a trace provide with given options. Look at ./ObjectDiagram.jpg
 	// to see how things are tied together.
 	tp := trace.NewTracerProvider(
+		// There are many built in samplers but if you want more customization, you need to
+		// implement the Sampler interface. That is what we do here. You can comment this line
+		// out and experiment with other built in samplers shown below.
+		trace.WithSampler(YourOwnCustomizedSampler()),
+
+		// Sampling is turned on unconditionally.
+		//trace.WithSampler(trace.AlwaysSample()),
+
+		// Sampling is turned off unconditionally.
+		//trace.WithSampler(trace.NeverSample()),
+
+		// This is a percentage based sampler. For example 50% of the traces
+		// will be sampled. The sample decision must be based on the trace ID
+		// because otherwise there would be gaps in the trace. This sampler
+		// looks at the trace ID and converts it to a data that can be used
+		// to make sampling decision. Run this sampler few many times, you will
+		// see that sometimes trace is sampled, sometimes not.
+		//trace.WithSampler(trace.TraceIDRatioBased(0.5)),
+
+		// Sometimes you want to make the decision by the consumer of your
+		// API. This sampler looks at the parent Span to decide
+		// if there should be sampler or not. The argument to this sampler
+		// is used if there is no parent span before. Following translates to
+		// "let the parent decide, if there is no parent, always sample". You can have
+		// more fine granular parent based decision like if the parent is a remote parent etc.
+		// https://opentelemetry.io/docs/reference/specification/trace/sdk/#parentbased
+		//trace.WithSampler(trace.ParentBased(trace.AlwaysSample())),
+
 		trace.WithBatcher(stdoutexporter),
 		trace.WithBatcher(otlpexporter),
 		trace.WithResource(res),
