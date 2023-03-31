@@ -8,10 +8,12 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/baggage"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.18.0"
@@ -43,6 +45,34 @@ func YourOwnCustomizedSampler() trace.Sampler {
 	return yourOwnCustomizedSampler{}
 }
 
+// textMapCarrier Implements propagation.TextMapCarrier interface which is part
+// of the methods of TextMapPropagator interface.
+type textMapCarrier struct {
+	m map[string]string
+}
+
+func newTextCarrier() *textMapCarrier {
+	return &textMapCarrier{m: map[string]string{}}
+}
+
+func (t *textMapCarrier) Get(key string) string {
+	return t.m[key]
+}
+
+func (t *textMapCarrier) Set(key string, value string) {
+	t.m[key] = value
+}
+
+func (t *textMapCarrier) Keys() []string {
+	str := make([]string, 0, len(t.m))
+
+	for key := range t.m {
+		str = append(str, key)
+	}
+
+	return str
+}
+
 // This is an application which happens to include a library (or a module).
 // For the sake of simplicity every thing is in the main file. It is important
 // to show the library part because there are certain things a library should
@@ -70,10 +100,18 @@ func main() {
 		}
 	}()
 
+	// Register TextMapPropagator interface implementers (trace context and baggage) as to
+	// be called when we do a context propagation. The sender part of the context propagation calls
+	// the Inject method and the receiver side calls Extract.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{}, propagation.Baggage{}))
+
 	// Since we don't have any previous context, we take the background one
-	InsertUser(context.Background(), "Foo")
+	//InsertUser(context.Background(), "Foo")
 	// This one will generate an error span.
-	InsertUser(context.Background(), "Bar")
+	//InsertUser(context.Background(), "Bar")
+
+	ExampleContextPropagation()
 }
 
 func initTracer() (*trace.TracerProvider, error) {
@@ -155,6 +193,43 @@ func initTracer() (*trace.TracerProvider, error) {
 // ---------------------------------------------------------------------------
 
 const name = "module-or-library-name"
+
+func ExampleContextPropagation() {
+	// As an application developer, you rarely need to interact with the context propagation APIs directly.
+	// Very likely there is an API or a library that handles the context propagation. For example
+	// go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp helps with context propagation
+	// over HTTP with W3C Header traceparent=.
+
+	// This example is not realistic because we could have done a context propagation over the golang
+	// context. It tries to show how context is serialized and deserialized with OpenTelemetry APIs.
+	// TraceContext and Baggage will be propagated through contexts below.
+
+	// Create a baggage.
+	bag, _ := baggage.Parse("foo=bar")
+	// Add Baggage to the context.
+	ctxSender := baggage.ContextWithBaggage(context.Background(), bag)
+
+	// Create a span for the sending part.
+	ctxSender, spanSender := otel.Tracer(name).Start(ctxSender, "Sender")
+	defer spanSender.End()
+
+	tmc := newTextCarrier()
+	// Serialize all registered TextMapPropagators to the tmc data structure.
+	otel.GetTextMapPropagator().Inject(ctxSender, tmc)
+	fmt.Printf("Carrier dump [%+v]\n", tmc)
+
+	// Propagation boundary ---------------------------------------------
+
+	// Deserialize all registered TextMapPropagators
+	ctxReceiver := otel.GetTextMapPropagator().Extract(context.TODO(), tmc)
+	fmt.Printf("Properties of the baggage:\n")
+	for _, m := range baggage.FromContext(ctxReceiver).Members() {
+		fmt.Printf("%s:%s\n", m.Key(), m.Value())
+	}
+	// Create a span for the receiving part.
+	_, spanReceiver := otel.Tracer(name).Start(ctxReceiver, "Receiver")
+	defer spanReceiver.End()
+}
 
 func InsertUser(ctx context.Context, user string) error {
 
