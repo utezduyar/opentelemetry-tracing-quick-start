@@ -20,6 +20,18 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
+func WeekdayDetector() resource.Detector {
+	return &detector{}
+}
+
+type detector struct {
+}
+
+func (d *detector) Detect(ctx context.Context) (*resource.Resource, error) {
+	return resource.NewSchemaless(
+		attribute.Key("Weekday").String(time.Now().Weekday().String())), nil
+}
+
 type yourOwnCustomizedSampler struct{}
 
 // ShouldSample is a method in Sampler's interface. This method is called every time, before
@@ -129,6 +141,18 @@ func initTracer() (*trace.TracerProvider, error) {
 			semconv.ServiceVersionKey.String("v1.0.0"),
 			attribute.String("foo", "bar"),
 		),
+		// Pull attributes from OTEL_RESOURCE_ATTRIBUTES and OTEL_SERVICE_NAME environment variables
+		resource.WithFromEnv(),
+		// Discovers process information
+		resource.WithProcess(),
+		// Discovers OS information
+		resource.WithOS(),
+		// Discovers container information
+		resource.WithContainer(),
+		// Discovers host information
+		resource.WithHost(),
+		// Bring your own external Detector implementation
+		resource.WithDetectors(WeekdayDetector()),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating resource.New: %w", err)
