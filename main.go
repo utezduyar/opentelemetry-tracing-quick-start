@@ -119,11 +119,11 @@ func main() {
 		propagation.TraceContext{}, propagation.Baggage{}))
 
 	// Since we don't have any previous context, we take the background one
-	//InsertUser(context.Background(), "Foo")
+	InsertUser(context.Background(), "Foo")
 	// This one will generate an error span.
 	//InsertUser(context.Background(), "Bar")
 
-	ExampleContextPropagation()
+	//ExampleContextPropagation()
 }
 
 func initTracer() (*trace.TracerProvider, error) {
@@ -257,6 +257,18 @@ func ExampleContextPropagation() {
 
 func InsertUser(ctx context.Context, user string) error {
 
+	// Let's prepare the structure that will be linked against the span below. In this example
+	// we are making up TraceID and SpanID. Multiple Link structure can be linked to the same span
+	a := []attribute.KeyValue{attribute.Bool("one", true), attribute.Bool("two", true)}
+	l := oteltrace.Link{
+		SpanContext: oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
+			TraceID:    [16]byte{0x01},
+			SpanID:     [8]byte{0x01},
+			TraceFlags: 0x1,
+		}),
+		Attributes: a,
+	}
+
 	// We are instrumenting the library to create a span. Libraries do this by
 	// linking to the OpenTelemetry API which is in module "go.opentelemetry.io/otel".
 	// Libraries are not allowed to link with the OpenTelemetry SDK layer.
@@ -277,7 +289,7 @@ func InsertUser(ctx context.Context, user string) error {
 	//   InsertUser/foo would be too specific. There are other ways to append specific information
 	//   to a span.
 	//
-	ctx2, span := otel.Tracer(name).Start(ctx, "InsertUser")
+	ctx2, span := otel.Tracer(name).Start(ctx, "InsertUser", oteltrace.WithLinks(l))
 	defer span.End()
 
 	// We are annotating the span. Essentially we are adding extra meta data that we can use later on.
